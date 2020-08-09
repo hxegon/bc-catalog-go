@@ -132,12 +132,22 @@ func (c *Client) GetCategoriesByPage(page int) ([]Category, error) {
 		return nil, err
 	}
 
+	// CLEANUP
+	if len(body) == 0 {
+		return []Category{}, nil
+	}
+
 	var listings categoryListings
 
 	// parse json bytes into categories
 	err = json.Unmarshal(body, &listings)
 	if err != nil {
+		debugJSON(body)
 		return nil, err
+	}
+
+	if status := listings.Status; status != 200 && status != 0 {
+		return listings.Data, fmt.Errorf("Request returned non-successful status code %d", status)
 	}
 
 	return listings.Data, nil
