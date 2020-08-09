@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strings"
 )
 
 func debugJSON(bs []byte) {
@@ -18,7 +19,7 @@ func debugJSON(bs []byte) {
 
 // Want to spike the bigcommerce client library and extract it once I have some working prototype code
 
-// A Category is taxon information and metadata
+// A Category is taxon information and metadata. See CatNode and CatTree.
 type Category struct {
 	Name        string `json:"name"`
 	ID          int    `json:"id"`
@@ -27,16 +28,103 @@ type Category struct {
 	IsVisible   bool   `json:"is_visible"`
 }
 
-type CatMap struct {
-	table map[string]*CatMap
+func (c *Category) IsChild() bool {
+	return c.ParentID != 0
 }
 
-func ToCatMap(cats []Category) (CatMap, error) {
-	return CatMap{}, nil
+type CatNode struct {
+	C        *Category
+	Children []*CatNode
 }
+
+type CatTree struct {
+	Root  *CatNode
+	Table map[int]*CatNode
+}
+
+func (ct *CatTree) LookupByID(id int) (*CatNode, bool) {
+	node, ok := ct.Table[id]
+	return node, ok
+}
+
+func (ct *CatTree) LookupByPath(query string) (last *CatNode, found bool) {
+	if query == "" {
+		return
+	}
+
+	path := strings.Split(query, "/")
+
+	last = ct.Root
+
+	for _, p := range path {
+		found = false
+
+		for _, child := range last.Children {
+			if child.C.Name == p {
+				found = true
+				last = child
+			}
+		}
+
+		if !found {
+			last = &CatNode{}
+			break
+		}
+	}
+
+	return
+}
+
+func MakeCatTree(cats []*Category) (*CatTree, error) {
+	rootNode := &CatNode{
+		C: &Category{
+			Name:        "root",
+			ID:          0,
+			ParentID:    0,
+			Description: "",
+			IsVisible:   false,
+		},
+		Children: []*CatNode{},
+	}
+
+	var table map[int]*CatNode
+	table[0] = rootNode
+
+	// initalize nodes, populate table
+	for _, c := range cats {
+		node := &CatNode{
+			C:        c,
+			Children: []*CatNode{},
+		}
+
+		table[c.ID] = node
+	}
+
+	// use table to build tree
+	for _, c := range cats {
+		parent, ok := table[c.ParentID]
+		if !ok { // bad parent id
+			return &CatTree{}, fmt.Errorf("Category (id: %d) with non-existant parent (id: %d)", c.ID, c.ParentID)
+		}
+
+		parent.Children = append(parent.Children, table[c.ID])
+	}
+
+	return &CatTree{
+		Table: table,
+		Root:  rootNode,
+	}, nil
+}
+
+// Add puts a Category into a CatMap, returning an "Overwritten" bool and an Error
+
+// func (cm *CatMap) Lookup(id int) (Category, bool)
+
+// func (cm *CatMap) Query(query string) (Category, bool)
 
 type categoryListings struct {
-	Data []Category `json:"data"`
+	Status int        `json:"status"`
+	Data   []Category `json:"data"`
 }
 
 // Bigcommerce catalogue client
@@ -70,7 +158,6 @@ func (c *Client) newRequest(method, url string, body io.Reader) (*http.Request, 
 // GetCategoriesByPage returns the json response with the categories and category data, and an error
 func (c *Client) GetCategoriesByPage(page int) ([]Category, error) {
 	endpoint := fmt.Sprintf("%s/%s", c.catalogURL, "categories")
-	log.Println(endpoint)
 	req, err := c.newRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, nil
@@ -125,21 +212,6 @@ func (c *Client) GetAllCategories() ([]Category, error) {
 	}
 
 	return all, nil
-}
-
-// GetCategoryID gets an ID string (and an OK bool) from bigcommerce based on your category string input
-func (c *Client) GetCategoryID(category string) (string, bool, error) {
-	// After browsing the API documentation for categories (https://developer.bigcommerce.com/api-reference/catalog/catalog-api/category/getcategories)
-	// The flow of this function should go like this:
-	// 0. Check if existing catMap
-	// If not:
-	// 1. Get all Categories (Client.GetCategories)
-	// 2. Construct a map of Category paths to category ids map[string(or category string type)]int(id) Client.
-	// 3. cache map into Client.catMap
-	// Then:
-	// 4. normalize category input string into key format of Client.catMap
-	// 5. return id, ok := Client.catMap[category]
-	return "", false, nil
 }
 
 // Reference: https://developer.bigcommerce.com/api-reference/catalog/catalog-api/products/createproduct
