@@ -6,19 +6,49 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
+	"net/url"
 )
+
+type pagination struct {
+	Total       int `json:"total"`
+	Count       int `json:"count"`
+	PerPage     int `json:"per_page"`
+	CurrentPage int `json:"current_page"`
+	TotalPages  int `json:"total_pages"`
+	Links       struct {
+		Next    string `json:"next"`
+		Current string `json:"current"`
+	} `json:"links"`
+}
 
 func debugJSON(bs []byte) {
 	var debugBuf bytes.Buffer
 	json.Indent(&debugBuf, bs, "", "\t")
-	log.Println(string(debugBuf.Bytes()))
+	fmt.Println(string(debugBuf.Bytes()))
+}
+
+func addURLParams(raw string, params map[string]string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", err
+	}
+
+	for k, v := range params {
+		q.Add(k, v)
+	}
+	u.RawQuery = q.Encode()
+
+	return u.String(), nil
 }
 
 // Want to spike the bigcommerce client library and extract it once I have some working prototype code
 
-// Bigcommerce catalogue client
+// Client for BigCommerce catalog API
 type Client struct {
 	HTTP        *http.Client
 	Store       string
@@ -46,9 +76,14 @@ func (c *Client) newRequest(method, url string, body io.Reader) (*http.Request, 
 // GetCategoriesByPage returns the json response with the categories and category data, and an error
 func (c *Client) GetCategoriesByPage(page int) ([]Category, error) {
 	endpoint := fmt.Sprintf("%s/%s", c.catalogURL, "categories")
-	req, err := c.newRequest("GET", endpoint, nil)
+	url, err := addURLParams(endpoint, map[string]string{"page": fmt.Sprint(page)})
 	if err != nil {
-		return nil, nil
+		return nil, err
+	}
+
+	req, err := c.newRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	// Send request and get response from bigcommerce
@@ -76,7 +111,6 @@ func (c *Client) GetCategoriesByPage(page int) ([]Category, error) {
 	// parse json bytes into categories
 	err = json.Unmarshal(body, &listings)
 	if err != nil {
-		debugJSON(body)
 		return nil, err
 	}
 
@@ -112,8 +146,21 @@ func (c *Client) GetAllCategories() ([]Category, error) {
 	return all, nil
 }
 
-// func NewClient(http http.Client, env map[string]string) (Client, error) {
-// }
+func (c *Client) GetCatTree() (*CatTree, error) {
+	nilct := &CatTree{}
+
+	cats, err := c.GetAllCategories()
+	if err != nil {
+		return nilct, err
+	}
+
+	ct, err := MakeCatTree(&cats)
+	if err != nil {
+		return nilct, err
+	}
+
+	return ct, nil
+}
 
 // Reference: https://developer.bigcommerce.com/api-reference/catalog/catalog-api/products/createproduct
 // func (c *Client) CreateProduct() (ProductID, error)
