@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"strings"
 )
 
@@ -21,7 +19,7 @@ func (c *Category) IsChild() bool {
 }
 
 type CatNode struct {
-	C        *Category
+	C        Category
 	Children []*CatNode
 }
 
@@ -35,6 +33,7 @@ func (ct *CatTree) LookupByID(id int) (*CatNode, bool) {
 	return node, ok
 }
 
+// LookupByPath takes a string with category names (case sensitive) separated by /. Returns *CatNode, bool
 func (ct *CatTree) LookupByPath(query string) (last *CatNode, found bool) {
 	if query == "" {
 		return
@@ -63,9 +62,9 @@ func (ct *CatTree) LookupByPath(query string) (last *CatNode, found bool) {
 	return
 }
 
-func MakeCatTree(cats []*Category) (*CatTree, error) {
+func MakeCatTree(cats *[]Category) (*CatTree, error) {
 	rootNode := &CatNode{
-		C: &Category{
+		C: Category{
 			Name:        "root",
 			ID:          0,
 			ParentID:    0,
@@ -75,21 +74,20 @@ func MakeCatTree(cats []*Category) (*CatTree, error) {
 		Children: []*CatNode{},
 	}
 
-	var table map[int]*CatNode
+	table := map[int]*CatNode{}
 	table[0] = rootNode
 
 	// initalize nodes, populate table
-	for _, c := range cats {
-		node := &CatNode{
+	for _, c := range *cats {
+		table[c.ID] = &CatNode{
 			C:        c,
 			Children: []*CatNode{},
 		}
 
-		table[c.ID] = node
 	}
 
 	// use table to build tree
-	for _, c := range cats {
+	for _, c := range *cats {
 		parent, ok := table[c.ParentID]
 		if !ok { // bad parent id
 			return &CatTree{}, fmt.Errorf("Category (id: %d) with non-existant parent (id: %d)", c.ID, c.ParentID)
@@ -107,73 +105,23 @@ func MakeCatTree(cats []*Category) (*CatTree, error) {
 type categoryListings struct {
 	Status int        `json:"status"`
 	Data   []Category `json:"data"`
+	Meta   struct {
+		Pagination pagination `json:"pagination"`
+	} `json:"meta"`
 }
 
-// GetCategoriesByPage returns the json response with the categories and category data, and an error
-func (c *Client) GetCategoriesByPage(page int) ([]Category, error) {
-	endpoint := fmt.Sprintf("%s/%s", c.catalogURL, "categories")
-	req, err := c.newRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, nil
-	}
-
-	// Send request and get response from bigcommerce
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if res.Body != nil {
-		defer res.Body.Close()
-	}
-
-	// get bytes from response body reader
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	// CLEANUP
-	if len(body) == 0 {
-		return []Category{}, nil
-	}
-
-	var listings categoryListings
-
-	// parse json bytes into categories
-	err = json.Unmarshal(body, &listings)
-	if err != nil {
-		debugJSON(body)
-		return nil, err
-	}
-
-	if status := listings.Status; status != 200 && status != 0 {
-		return listings.Data, fmt.Errorf("Request returned non-successful status code %d", status)
-	}
-
-	return listings.Data, nil
+func (l *categoryListings) CurrentPage() int {
+	return l.Meta.Pagination.CurrentPage
 }
 
-// GetAllCategories abstracts over the pagination of GetCategoriesByPage
-func (c *Client) GetAllCategories() ([]Category, error) {
-	var all []Category
-	pageIndex := 1
-	for {
-		page, err := c.GetCategoriesByPage(pageIndex)
-		if err != nil {
-			return nil, err
-		}
+func (l *categoryListings) TotalPages() int {
+	return l.Meta.Pagination.TotalPages
+}
 
-		// CHECK: If you ask for a page which wouldn't contain any categories:
-		// i.e. with 50 categories and 10 categories per page you ask for page 6
-		// Does bigcommerce return an empty page or return with error?
-		// if it returns with error is that something we should abstract in GetCategoriesByPage
-		if len(page) == 0 {
-			break
-		}
-
-		all = append(all, page...)
-		pageIndex++
+func (l *categoryListings) IsLastPage() bool {
+	if l.TotalPages() > 0 {
+		return l.CurrentPage()/l.TotalPages() == 1
 	}
 
-	return all, nil
+	return true
 }
