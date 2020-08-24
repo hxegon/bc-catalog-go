@@ -34,27 +34,27 @@ func (ct *CatTree) LookupByID(id int) (*CatNode, bool) {
 }
 
 // LookupByPath takes a string with category names (case sensitive) separated by /. Returns *CatNode, bool
-func (ct *CatTree) LookupByPath(query string) (last *CatNode, found bool) {
+func (ct *CatTree) LookupByPath(query string) (node *CatNode, found bool) {
 	if query == "" {
 		return
 	}
 
 	path := strings.Split(query, "/")
 
-	last = ct.Root
+	node = ct.Root
 
 	for _, p := range path {
 		found = false
 
-		for _, child := range last.Children {
+		for _, child := range node.Children {
 			if child.C.Name == p {
 				found = true
-				last = child
+				node = child
 			}
 		}
 
 		if !found {
-			last = &CatNode{}
+			node = &CatNode{}
 			break
 		}
 	}
